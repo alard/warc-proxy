@@ -1,0 +1,18 @@
+<p>
+  {% for f in cur_dir_parts %}
+    <a href="{{ escape(f["url"]) }}">{{ "ROOT" if f["name"] is None else escape(f["name"]) }}</a> /
+  {% end %}
+</p>
+
+<ul>
+  {% for f in [ f for f in files if f["isdir"] ] %}
+    <li><a href="{{ escape(f["url"]) }}">{{ escape(f["name"]) }}</a></li>
+  {% end %}
+  {% for f in [ f for f in files if f["iswarc"] ] %}
+    <li>
+      {{ escape(f["name"]) }}
+      <form method="post" action="/load-warc"><input type="hidden" name="path" value="{{ escape(f["path"]) }}" /><input type="submit" value="Load" /></form>
+    </li>
+  {% end %}
+</ul>
+
