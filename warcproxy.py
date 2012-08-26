@@ -33,7 +33,7 @@ class WarcProxy(object):
         warc = WarcRecord.open_archive(path, gzip="auto")
         for (offset, record, errors) in warc.read_records(limit=None):
           if record and record.type == WarcRecord.RESPONSE and record.content[0] == ResponseMessage.CONTENT_TYPE:
-            records[record.uri] = offset
+            records[record.url] = offset
         warc.close()
 
         with open(idx_file, "wb") as f:
