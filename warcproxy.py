@@ -298,7 +298,7 @@ class WarcHandler(tornado.web.RequestHandler):
     if action == "list":
       self.set_header("Content-Type", "application/json")
       self.write(json.dumps({
-        "paths": self.warc_proxy.indices.keys(),
+        "paths": [ f for f in self.warc_proxy.warc_files ],
         "uri_count": self.warc_proxy.uri_count()
       }))
 

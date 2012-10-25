@@ -127,7 +127,7 @@ $(function(){
           $('#'+li_id+' .progress').remove();
           prepareFileUriTree(path, li_id);
 
-          updateAllWarcs();
+          updateProxyStatus();
 
         } else {
           if (data.bytes_read) {
@@ -154,11 +154,11 @@ $(function(){
       success: function(data) {
         $('#'+li_id).remove();
 
-        updateAllWarcs();
+        updateProxyStatus();
       }
     });
   }
-  function updateAllWarcs() {
+  function updateProxyStatus() {
     $.ajax({
       url: '/list-warcs',  type: 'GET',
       dataType: 'json',
@@ -174,9 +174,25 @@ $(function(){
         }
         $('#global-stats').text(t);
 
-        for (var i=0; i<data.paths.length; i++) {
-          addFile(data.paths[i]);
+        var currentFiles = $('li.file');
+        for (var i=0; i<currentFiles.length; i++) {
+          var path = $(currentFiles[i]).attr('data-path');
+          if (data.paths.indexOf(path) == -1) {
+            unloadWarc(path);
+          }
         }
+        for (var i=0; i<data.paths.length; i++) {
+          var li_id = 'file-' + pathNameToId(data.paths[i]);
+          if (!document.getElementById(li_id)) {
+            addFile(data.paths[i]);
+          }
+        }
+
+        $('#proxy-unavailable').css('display', 'none');
+      },
+      timeout: 300,
+      error: function() {
+        $('#proxy-unavailable').css('display', 'block');
       }
     });
   }
@@ -194,7 +210,8 @@ $(function(){
     return false;
   }
 
-  updateAllWarcs();
+  updateProxyStatus();
+  window.setInterval(updateProxyStatus, 5000);
 
 });
 

@@ -126,3 +126,19 @@ ul.dynatree-container a:focus, span.dynatree-focused a:link {
   margin: 0;
 }
 
+#proxy-unavailable {
+  display: block;
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 100%;
+  background: #fff;
+  z-index: 100;
+}
+#proxy-unavailable p {
+  font-size: 18px;
+  margin: 2em 1em;
+  text-align: center;
+}
+
