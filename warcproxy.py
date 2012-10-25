@@ -77,6 +77,8 @@ class WarcIndexer(Thread):
     path = self.path
     idx_file = "%s.idx" % path
 
+    records = None
+
     if os.path.exists(idx_file) and os.path.getmtime(idx_file) >= os.path.getmtime(path):
       print "Loading " + path + " from cache"
       self.status = "loading-cache"
@@ -84,10 +86,16 @@ class WarcIndexer(Thread):
         def update_progress():
           self.bytes_read = f.tell()
         f_pr = IOWithProgress(f, update_progress)
-        records = cPickle.load(f_pr)
+        data = cPickle.load(f_pr)
       self.bytes_read = self.bytes_total
+
+      if "version" in data and data["version"] == 1:
+        records = data["records"]
     
-    else:
+    if not records:
+      self.status = "indexing"
+      self.bytes_total = os.path.getsize(self.path)
+
       print "Loading " + path
       records = OrderedDict()
       warc = WarcRecord.open_archive(path, gzip="auto")
@@ -104,7 +112,7 @@ class WarcIndexer(Thread):
       warc.close()
 
       with open(idx_file, "wb") as f:
-        cPickle.dump(records, f)
+        cPickle.dump({ "version": 1, "records": records }, f)
 
     if self.cancel:
       raise Exception("Loading " + path + " canceled")
@@ -318,5 +326,13 @@ my_application = WarcProxyWithWeb(warc_proxy, web_application)
 if __name__ == "__main__":
   http_server = tornado.httpserver.HTTPServer(my_application)
   http_server.listen(8000)
+
+  print "WARC viewer"
+  print
+  print "Configure your browser to use this proxy:"
+  print "  http://127.0.0.1:8000/"
+  print "and then go to http://warc/"
+  print
+
   tornado.ioloop.IOLoop.instance().start()
 
