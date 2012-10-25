@@ -5,9 +5,10 @@ WARC viewer for browsing the contents of a WARC file.
 3. Check out the code: <code>git clone https://github.com/alard/warc-proxy</code>
 4. Run the proxy: <code>python warcproxy.py</code>
 
-On Firefox: install the <a href="https://github.com/alard/warc-proxy/raw/master/firefox-addon/warc-viewer.xpi">warc-viewer.xpi</a> and start the WARC viewer from the Tools menu.
+On Firefox: install the <code>firefox-addon/warc-viewer.xpi</code> and start the WARC viewer from the Tools menu.
 
 On other browsers:
+
 5. Set the HTTP proxy of your browser to <code>localhost</code> port <code>8000</code>
 6. Visit <code>http://warc/</code>
 
