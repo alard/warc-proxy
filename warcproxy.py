@@ -1,9 +1,12 @@
+import gc
 import os
 import os.path
 import cPickle
+import json
 import re
 from collections import OrderedDict
 from contextlib import contextmanager
+from threading import Thread
 
 import tornado.httpserver
 import tornado.ioloop
@@ -14,55 +17,191 @@ from hanzo.warctools import WarcRecord
 from hanzo.httptools import RequestMessage, ResponseMessage
 
 
+# warclinks.py
+def parse_http_response(record):
+  message = ResponseMessage(RequestMessage())
+  remainder = message.feed(record.content[1])
+  message.close()
+  if remainder or not message.complete():
+    if remainder:
+      print 'trailing data in http response for %s'% record.url
+    if not message.complete():
+      print 'truncated http response for %s'%record.url
+
+  header = message.header
+
+  mime_type = [v for k,v in header.headers if k.lower() =='content-type']
+  if mime_type:
+    mime_type = mime_type[0].split(';')[0]
+  else:
+    mime_type = None
+
+  return header.code, mime_type, message
+
+
+class IOWithProgress(object):
+  def __init__(self, io, callback):
+    self._io = io
+    self.callback = callback
+
+  def read(self, bs=None):
+    self.callback()
+    if bs:
+      return self._io.read(bs)
+    else:
+      return self._io.read()
+
+  def readline(self, bs=None):
+    self.callback()
+    if bs:
+      return self._io.readline(bs)
+    else:
+      return self._io.readline()
+
+
+class WarcIndexer(Thread):
+  def __init__(self, path):
+    super(WarcIndexer, self).__init__()
+    idx_file = "%s.idx" % path
+    if os.path.exists(idx_file) and os.path.getmtime(idx_file) >= os.path.getmtime(path):
+      self.status = "loading-cache"
+      self.bytes_total = os.path.getsize(idx_file)
+    else:
+      self.status = "indexing"
+      self.bytes_total = os.path.getsize(self.path)
+    self.path = path
+    self.bytes_read = 0
+    self.cancel = False
+
+  def run(self):
+    path = self.path
+    idx_file = "%s.idx" % path
+
+    if os.path.exists(idx_file) and os.path.getmtime(idx_file) >= os.path.getmtime(path):
+      print "Loading " + path + " from cache"
+      self.status = "loading-cache"
+      with open(idx_file, "rb") as f:
+        def update_progress():
+          self.bytes_read = f.tell()
+        f_pr = IOWithProgress(f, update_progress)
+        records = cPickle.load(f_pr)
+      self.bytes_read = self.bytes_total
+    
+    else:
+      print "Loading " + path
+      records = OrderedDict()
+      warc = WarcRecord.open_archive(path, gzip="auto")
+      for (offset, record, errors) in warc.read_records(limit=None):
+        if self.cancel:
+          raise Exception("Loading " + path + " canceled")
+
+        if record and re.sub(r"[^a-z;=/]+", "", record.type) == WarcRecord.RESPONSE and re.sub(r"[^a-z;=/]+", "", record.content[0]) == ResponseMessage.CONTENT_TYPE:
+          http_response = parse_http_response(record)
+          records[record.url] = { "offset":offset, "code":http_response[0], "type":http_response[1] }
+
+        self.bytes_read = offset
+
+      warc.close()
+
+      with open(idx_file, "wb") as f:
+        cPickle.dump(records, f)
+
+    if self.cancel:
+      raise Exception("Loading " + path + " canceled")
+
+    print "Indexed "+path+". Found "+str(len(records))+" URLs"
+    self.status = "indexed"
+    self.records = records
+
+
 class WarcProxy(object):
   def __init__(self):
     self.warc_files = set()
+    self.indexers = {}
     self.indices = {}
 
   def load_warc_file(self, path):
-    if not path in self.warc_files:
+    if path in self.indexers:
+      indexer = self.indexers[path]
+      if indexer.is_alive():
+        return { "status": indexer.status, "bytes_total": indexer.bytes_total, "bytes_read": indexer.bytes_read }
+      elif not indexer.cancel:
+        self.indices[path] = indexer.records
+        del self.indexers[path]
+
+    if path in self.indices:
+      return { "status": "indexed", "record_count": len(self.indices[path]) }
+    else:
       self.warc_files.add(path)
-      idx_file = "%s.idx" % path
-
-      if os.path.exists(idx_file) and os.path.getmtime(idx_file) >= os.path.getmtime(path):
-        with open(idx_file, "rb") as f:
-          records = cPickle.load(f)
-      
-      else:
-        records = OrderedDict()
-        warc = WarcRecord.open_archive(path, gzip="auto")
-        for (offset, record, errors) in warc.read_records(limit=None):
-          if record and record.type == WarcRecord.RESPONSE and record.content[0] == ResponseMessage.CONTENT_TYPE:
-            records[record.url] = offset
-        warc.close()
-
-        with open(idx_file, "wb") as f:
-          cPickle.dump(records, f)
-
-      print "Indexed. Found "+str(len(records))+" URLs"
-
-      self.indices[path] = records
-
-    return len(self.indices[path])
+      indexer = WarcIndexer(path)
+      self.indexers[path] = indexer
+      indexer.start()
+      return { "status": indexer.status, "bytes_total": indexer.bytes_total, "bytes_read": indexer.bytes_read }
 
   def unload_warc_file(self, path):
-    self.warc_files.discard(path)
-    del self.indices[path]
+    if path in self.indexers:
+      print "Canceling " + path
+      self.indexers[path].cancel = True
+      self.warc_files.discard(path)
+      if path in self.indices:
+        del self.indices[path]
+
+    elif path in self.indices:
+      print "Unloading " + path
+      self.warc_files.discard(path)
+      del self.indices[path]
+
+    gc.collect()
+
+  def uri_count(self):
+    n = 0
+    for uris in self.indices.itervalues():
+      n += len(uris)
+    return n
 
   def iteruris(self):
     for uris in self.indices.itervalues():
       for uri in uris.iterkeys():
         yield uri
 
+  def uri_tree(self, path, status_code=None, mime_type=None):
+    if status_code:
+      status_code = int(status_code)
+    if mime_type:
+      mime_type = re.compile(mime_type, re.I)
+
+    HTTP_SUB = re.compile(r"^https?:\/\/|/$")
+    PATH_PART = re.compile(r"[/?]*[^/?]+")
+
+    tree = {}
+    for (uri, data) in self.indices[path].iteritems():
+      if status_code and status_code != data["code"]:
+        continue
+      if mime_type and not mime_type.search(data["type"]):
+        continue
+
+      path_without_http = HTTP_SUB.sub("", uri)
+      cur_tree = tree
+      for part in PATH_PART.finditer(path_without_http):
+        part = part.group(0)
+        if "children" not in cur_tree:
+          cur_tree["children"] = {}
+        if part not in cur_tree["children"]:
+          cur_tree["children"][part] = {}
+        cur_tree = cur_tree["children"][part]
+      cur_tree["uri"] = uri
+
+    return tree
+
   @contextmanager
   def warc_record_for_uri(self, uri):
     found = False
-    for (path, offsets) in self.indices.iteritems():
-      if uri in offsets:
+    for (path, uris) in self.indices.iteritems():
+      if uri in uris:
         warc = WarcRecord.open_archive(path, gzip="auto")
-        warc.seek(offsets[uri])
+        warc.seek(uris[uri]["offset"])
 
-        for record in warc.read_records(limit=1, offsets=offsets[uri]):
+        for record in warc.read_records(limit=1, offsets=uris[uri]["offset"]):
           found = True
           yield record
 
@@ -112,29 +251,23 @@ class FileBrowserHandler(tornado.web.RequestHandler):
     except OSError:
       files = []
 
-    files.sort()
+    files.sort(key=lambda f: f.lower())
+
     files = [{
-      "name":   f,
-      "path":   os.path.join(cur_dir, f),
-      "url":    ("?path=%s" % tornado.escape.url_escape(os.path.join(cur_dir, f))),
-      "isdir":  os.path.isdir(os.path.join(cur_dir, f)),
-      "iswarc": re.match(r".+\.warc(\.gz)?$", f)
-    } for f in files ]
-
-    cur_dir_parts = []
-    part = "X"
-    while part:
-      parent_dir, part = os.path.split(cur_dir)
-      cur_dir_parts.append({ "name":part, "path":cur_dir, "url":("?path=%s" % tornado.escape.url_escape(cur_dir)) })
-      cur_dir = parent_dir
-    cur_dir_parts.reverse()
-
-    self.render("browse.html", cur_dir_parts=cur_dir_parts, files=files)
+      "title":    f,
+      "path":     os.path.join(cur_dir, f),
+      "isFolder": os.path.isdir(os.path.join(cur_dir, f)),
+      "is_warc":  bool(re.match(r".+\.warc(\.gz)?$", f)),
+      "isLazy":   os.path.isdir(os.path.join(cur_dir, f))
+    } for f in files if (os.path.isdir(os.path.join(cur_dir, f)) or re.match(r".+\.warc(\.gz)?$", f)) ]
+    
+    self.set_header("Content-Type", "application/json")
+    self.write(json.dumps(files))
 
 
 class MainHandler(tornado.web.RequestHandler):
   def get(self):
-    self.write("Hello, world.")
+    self.render("html/frames.html")
 
 
 class WarcIndexHandler(tornado.web.RequestHandler):
@@ -142,33 +275,42 @@ class WarcIndexHandler(tornado.web.RequestHandler):
     self.warc_proxy = warc_proxy
 
   def get(self):
-    self.write("<ul>")
-    for uri in self.warc_proxy.iteruris():
-      self.write('<li><a href="%s">%s</a></li>' % (uri, uri))
-    self.write("</ul>")
+    self.set_header("Content-Type", "application/json")
+    self.write(json.dumps(self.warc_proxy.uri_tree(
+                 path=self.get_argument("path"),
+                 status_code=self.get_argument("status_code", None),
+                 mime_type=self.get_argument("mime_type", None))))
 
 
 class WarcHandler(tornado.web.RequestHandler):
   def initialize(self, warc_proxy):
     self.warc_proxy = warc_proxy
 
+  def get(self, action):
+    if action == "list":
+      self.set_header("Content-Type", "application/json")
+      self.write(json.dumps({
+        "paths": self.warc_proxy.indices.keys(),
+        "uri_count": self.warc_proxy.uri_count()
+      }))
+
   def post(self, action):
     if action == "load":
       path = self.get_argument("path")
-      print "Loading " + path
-      num_records = self.warc_proxy.load_warc_file(path)
-      self.write("Indexed %s. Found %d URLs." % (path, num_records))
+      index_status = self.warc_proxy.load_warc_file(path)
+      self.set_header("Content-Type", "application/json")
+      self.write(json.dumps(index_status))
     elif action == "unload":
-      print "Unloading " + self.get_argument("path")
       self.warc_proxy.unload_warc_file(self.get_argument("path"))
 
 
 warc_proxy = WarcProxy()
 web_application = tornado.web.Application([
   (r"/", MainHandler),
-  (r"/browse", FileBrowserHandler),
-  (r"/(load|unload)-warc", WarcHandler, { "warc_proxy":warc_proxy }),
-  (r"/index", WarcIndexHandler, { "warc_proxy":warc_proxy })
+  (r"/browse\.json", FileBrowserHandler),
+  (r"/(list|load|unload)-warcs?", WarcHandler, { "warc_proxy":warc_proxy }),
+  (r"/index\.json", WarcIndexHandler, { "warc_proxy":warc_proxy }),
+  (r"/static/(.*)", tornado.web.StaticFileHandler, {"path": "html"})
 ], debug=True)
 
 my_application = WarcProxyWithWeb(warc_proxy, web_application)
