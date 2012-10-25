@@ -126,7 +126,8 @@ ul.dynatree-container a:focus, span.dynatree-focused a:link {
   margin: 0;
 }
 
-#proxy-unavailable {
+#proxy-unavailable,
+#proxy-disabled {
   display: block;
   position: fixed;
   left: 0;
@@ -136,9 +137,36 @@ ul.dynatree-container a:focus, span.dynatree-focused a:link {
   background: #fff;
   z-index: 100;
 }
-#proxy-unavailable p {
-  font-size: 18px;
-  margin: 2em 1em;
+#proxy-unavailable p,
+#proxy-disabled p {
+  font-size: 16px;
+  margin: 1em 1em;
   text-align: center;
+}
+#proxy-disabled .alert ,
+#proxy-unavailable .alert {
+  margin: 2em;
+}
+#proxy-disabled .alert p ,
+#proxy-unavailable .alert p {
+  margin: 0;
+}
+#proxy-disabled p:first-child {
+  margin-top: 3em;
+  margin-bottom: 2em;
+}
+
+.addon-mozilla #head {
+  display: none;
+}
+.addon-mozilla #files div.stats {
+  padding: 5px 7px 5px 9px;
+  background: #fafafa;
+  border-top: 1px solid #BBB;
+  border-bottom: 1px solid #BBB;
+}
+.addon-mozilla #proxy-disabled,
+.addon-mozilla #proxy-unavailable {
+  border-top: 1px solid #BBB;
 }
 

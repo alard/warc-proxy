@@ -1,3 +1,6 @@
+window.addonType = window.addonType || null;
+window.proxyRoot = window.proxyRoot || '';
+
 $(function(){
 
   function convertDataToNodes(data, collapse) {
@@ -30,27 +33,11 @@ $(function(){
     return nodes;
   }
 
-  $('#fileBrowserTree').dynatree({
-    onActivate: function(node) {
-      if (node.data.is_warc) {
-        $('#fileBrowserPath').attr('value', node.data.path);
-      }
-    },
-    initAjax: {
-      url: '/browse.json', dataType: 'json', data: { path: '/' }
-    },
-    onLazyRead: function(node) {
-      node.appendAjax({
-        url: '/browse.json', dataType: 'json', data: { path: node.data.path }
-      });
-    }
-  });
-
   function onClick_radioMimetypeButton(e) {
     var mimetypeBtn = $(e.target),
         li = mimetypeBtn.parents('li.file'),
         treeDiv = li.children('div.tree'),
-        tree = treeDiv.dynatree("getTree");
+        tree = treeDiv.dynatree('getTree');
     tree.options.initAjax.data.mime_type = mimetypeBtn.attr('data-mimetype');
     tree.reload();
   }
@@ -98,14 +85,14 @@ $(function(){
     $('#'+li_id+' .tree').dynatree({
       onActivate: function(node) {
         if (node.data.uri) {
-          parent.archived_page.location.href = node.data.uri;
+          navigateToArchivedUri(node.data.uri);
         }
       },
       classNames: {
         nodeIcon: 'icon-dynatree'
       },
       initAjax: {
-        url: '/index.json', dataType: 'json',
+        url: window.proxyRoot+'/index.json', dataType: 'json',
         data: { path: path, mime_type: 'text/(plain|html)' },
         postProcess: function(d) { return convertDataToNodes(d); }
       }
@@ -119,7 +106,7 @@ $(function(){
     }
 
     $.ajax({
-      url: '/load-warc',  type: 'POST', data: { path: path },
+      url: window.proxyRoot+'/load-warc',  type: 'POST', data: { path: path },
       dataType: 'json',
       success: function(data) {
         if (data.status == 'indexed') {
@@ -149,7 +136,7 @@ $(function(){
 
     var li_id = 'file-'+pathNameToId(path);
     $.ajax({
-      url: '/unload-warc',  type: 'POST', data: { path: path },
+      url: window.proxyRoot+'/unload-warc',  type: 'POST', data: { path: path },
       dataType: 'json',
       success: function(data) {
         $('#'+li_id).remove();
@@ -160,7 +147,7 @@ $(function(){
   }
   function updateProxyStatus() {
     $.ajax({
-      url: '/list-warcs',  type: 'GET',
+      url: window.proxyRoot+'/list-warcs',  type: 'GET',
       dataType: 'json',
       success: function(data) {
         var t = data.paths.length;
@@ -190,18 +177,12 @@ $(function(){
 
         $('#proxy-unavailable').css('display', 'none');
       },
-      timeout: 300,
+      timeout: 1000,
       error: function() {
         $('#proxy-unavailable').css('display', 'block');
       }
     });
   }
-
-  $('#form-add-file').submit(function(e) {
-    e.stopPropagation();
-    addFile(document.getElementById('fileBrowserPath').value);
-    return false;
-  });
 
   function onClick_unloadFile(e) {
     e.stopPropagation();
@@ -212,6 +193,78 @@ $(function(){
 
   updateProxyStatus();
   window.setInterval(updateProxyStatus, 5000);
+
+
+  if (window.addonType == 'mozilla') {
+
+    $('#add-an-archive-button').click(function(e) {
+      e.stopPropagation();
+      var event = document.createEvent("CustomEvent");
+      event.initCustomEvent("addon-request-open-warc-file", true, true, {});
+      document.documentElement.dispatchEvent(event);
+      return false;
+    });
+
+    document.documentElement.addEventListener("addon-open-warc-file", function(event) {
+      if (event.detail.pathname) {
+        addFile(event.detail.pathname);
+      }
+    }, false);
+
+    document.documentElement.addEventListener("addon-proxy-enabled", function(event) {
+      $('#proxy-disabled').css('display', 'none');
+    }, false);
+
+    function navigateToArchivedUri(uri) {
+      var event = document.createEvent("CustomEvent");
+      event.initCustomEvent("addon-request-navigate", true, true, { uri: uri });
+      document.documentElement.dispatchEvent(event);
+    }
+
+    $('#start-proxying-button').click(function(e) {
+      var event = document.createEvent("CustomEvent");
+      event.initCustomEvent("addon-request-toggle-proxy", true, true, { new_state: true });
+      document.documentElement.dispatchEvent(event);
+    });
+
+    $('body').addClass('addon-mozilla');
+    $('#proxy-disabled').css('display', 'block');
+
+  } else {
+
+    $('#add-an-archive-button').click(function(e) {
+      e.stopPropagation();
+      $('#fileBrowserDialog').modal('show');
+      return false;
+    });
+
+    $('#fileBrowserTree').dynatree({
+      onActivate: function(node) {
+        if (node.data.is_warc) {
+          $('#fileBrowserPath').attr('value', node.data.path);
+        }
+      },
+      initAjax: {
+        url: window.proxyRoot+'/browse.json', dataType: 'json', data: { path: '/' }
+      },
+      onLazyRead: function(node) {
+        node.appendAjax({
+          url: window.proxyRoot+'/browse.json', dataType: 'json', data: { path: node.data.path }
+        });
+      }
+    });
+
+    $('#form-add-file').submit(function(e) {
+      e.stopPropagation();
+      addFile(document.getElementById('fileBrowserPath').value);
+      return false;
+    });
+
+    function navigateToArchivedUri(uri) {
+      parent.archived_page.location.href = uri;
+    }
+
+  }
 
 });
 

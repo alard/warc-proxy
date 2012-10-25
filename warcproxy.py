@@ -68,7 +68,7 @@ class WarcIndexer(Thread):
       self.bytes_total = os.path.getsize(idx_file)
     else:
       self.status = "indexing"
-      self.bytes_total = os.path.getsize(self.path)
+      self.bytes_total = os.path.getsize(path)
     self.path = path
     self.bytes_read = 0
     self.cancel = False
@@ -220,7 +220,8 @@ class WarcProxy(object):
 
 
 class WarcProxyWithWeb(object):
-  WEB_RE = re.compile(r"^http://(?P<host>warc)(?P<uri>/.*)$")
+  WEB_RE = re.compile(r"^(?P<uri>/.*)$")
+  WEB_VIA_PROXY_RE = re.compile(r"^http://(?P<host>warc)(?P<uri>/.*)$")
 
   def __init__(self, proxy_handler, web_handler):
     self.proxy_handler = proxy_handler
@@ -229,8 +230,11 @@ class WarcProxyWithWeb(object):
   def __call__(self, request):
     """Called by HTTPServer to execute the request."""
     web_match = re.match(self.WEB_RE, request.uri)
+    if not web_match:
+      web_match = re.match(self.WEB_VIA_PROXY_RE, request.uri)
+
     if web_match:
-      request.host = web_match.group("host")
+      request.host = "warc"
       request.uri = web_match.group("uri")
       request.path, sep, query = request.uri.partition("?")
       self.web_handler.__call__(request)
@@ -242,7 +246,7 @@ class WarcProxyWithWeb(object):
           request.write(record[1].content[1])
         else:
           print "Could not find %s in WARC" % request.uri
-          request.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nNot Found.\r\n")
+          request.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nThis URL is not in any of your archives. Close the WARC viewer to resume normal browsing.\r\n")
       request.finish()
 
 
@@ -270,6 +274,7 @@ class FileBrowserHandler(tornado.web.RequestHandler):
     } for f in files if (os.path.isdir(os.path.join(cur_dir, f)) or re.match(r".+\.warc(\.gz)?$", f)) ]
     
     self.set_header("Content-Type", "application/json")
+    self.set_header("Access-Control-Allow-Origin", "*")
     self.write(json.dumps(files))
 
 
@@ -284,6 +289,7 @@ class WarcIndexHandler(tornado.web.RequestHandler):
 
   def get(self):
     self.set_header("Content-Type", "application/json")
+    self.set_header("Access-Control-Allow-Origin", "*")
     self.write(json.dumps(self.warc_proxy.uri_tree(
                  path=self.get_argument("path"),
                  status_code=self.get_argument("status_code", None),
@@ -297,6 +303,7 @@ class WarcHandler(tornado.web.RequestHandler):
   def get(self, action):
     if action == "list":
       self.set_header("Content-Type", "application/json")
+      self.set_header("Access-Control-Allow-Origin", "*")
       self.write(json.dumps({
         "paths": [ f for f in self.warc_proxy.warc_files ],
         "uri_count": self.warc_proxy.uri_count()
@@ -307,8 +314,10 @@ class WarcHandler(tornado.web.RequestHandler):
       path = self.get_argument("path")
       index_status = self.warc_proxy.load_warc_file(path)
       self.set_header("Content-Type", "application/json")
+      self.set_header("Access-Control-Allow-Origin", "*")
       self.write(json.dumps(index_status))
     elif action == "unload":
+      self.set_header("Access-Control-Allow-Origin", "*")
       self.warc_proxy.unload_warc_file(self.get_argument("path"))
 
 
@@ -329,9 +338,13 @@ if __name__ == "__main__":
 
   print "WARC viewer"
   print
-  print "Configure your browser to use this proxy:"
-  print "  http://127.0.0.1:8000/"
-  print "and then go to http://warc/"
+  print "Firefox:"
+  print "  Use the add-on."
+  print
+  print "Other browsers:"
+  print "  Configure your browser to use this proxy:"
+  print "    http://127.0.0.1:8000/"
+  print "  and then go to http://warc/"
   print
 
   tornado.ioloop.IOLoop.instance().start()
