@@ -259,17 +259,12 @@ class WarcProxyWithWeb(object):
           # construct new headers
           new_headers = []
           old_headers = []
-          chunked = False
           for k, v in message.header.headers:
-            if k.lower() == "transfer-encoding" and v == "chunked":
-              chunked = True
-            if not k.lower() in ("connection", "content-length", "cache-control", "accept-ranges", "etag", "last-modified"):
+            if not k.lower() in ("connection", "content-length", "cache-control", "accept-ranges", "etag", "last-modified", "transfer-encoding"):
               new_headers.append((k, v))
             old_headers.append(("X-Archive-Orig-%s" % k, v))
 
-          if not chunked:
-            new_headers.append(("Content-Length", "%d" % len(body)))
-
+          new_headers.append(("Content-Length", "%d" % len(body)))
           new_headers.append(("Connection", "keep-alive"))
 
           # write the response
