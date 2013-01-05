@@ -246,7 +246,7 @@ class WarcProxyWithWeb(object):
           request.write(record[1].content[1])
         else:
           print "Could not find %s in WARC" % request.uri
-          request.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 12\r\n\r\nThis URL is not in any of your archives. Close the WARC viewer to resume normal browsing.\r\n")
+          request.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 91\r\n\r\nThis URL is not in any of your archives. Close the WARC viewer to resume normal browsing.\r\n")
       request.finish()
 
 
