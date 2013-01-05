@@ -38,6 +38,10 @@ def parse_http_response(record):
 
   return header.code, mime_type, message
 
+def canonicalize_url(url):
+  if re.match(r"^https?://[^/]+$", url):
+    url += "/"
+  return url
 
 class IOWithProgress(object):
   def __init__(self, io, callback):
@@ -105,7 +109,7 @@ class WarcIndexer(Thread):
 
         if record and re.sub(r"[^a-z;=/]+", "", record.type) == WarcRecord.RESPONSE and re.sub(r"[^a-z;=/]+", "", record.content[0]) == ResponseMessage.CONTENT_TYPE:
           http_response = parse_http_response(record)
-          records[record.url] = { "offset":offset, "code":http_response[0], "type":http_response[1] }
+          records[canonicalize_url(record.url)] = { "offset":offset, "code":http_response[0], "type":http_response[1] }
 
         self.bytes_read = offset
 
@@ -240,7 +244,7 @@ class WarcProxyWithWeb(object):
       self.web_handler.__call__(request)
 
     else:
-      with self.proxy_handler.warc_record_for_uri(request.uri) as record:
+      with self.proxy_handler.warc_record_for_uri(canonicalize_url(request.uri)) as record:
         if record:
           print "Serving %s from WARC" % request.uri
           request.write(record[1].content[1])
