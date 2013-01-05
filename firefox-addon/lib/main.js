@@ -19,7 +19,8 @@ exports.main = function() {
     function openFileDialog(callback) {
         var quickIO = require("quickFileIO").quickIO();
         quickIO.filterAll = false;
-        quickIO.filterExtra.push(["WARC", "*.warc.gz"]);
+        quickIO.filterExtra.push(["WARC", "*.warc.gz; *.warc"]);
+        quickIO.filterExtra.push(["All files", "*.*; *"]);
         quickIO.dialogOpenTitle = "Open archive";
         quickIO.open(callback);
     }
