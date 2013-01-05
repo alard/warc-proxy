@@ -190,7 +190,7 @@ class WarcProxy(object):
     for (uri, data) in self.indices[path].iteritems():
       if status_code and status_code != data["code"]:
         continue
-      if mime_type and not mime_type.search(data["type"]):
+      if mime_type and data["type"] and not mime_type.search(data["type"]):
         continue
 
       path_without_http = HTTP_SUB.sub("", uri)
