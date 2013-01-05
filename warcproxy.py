@@ -248,7 +248,31 @@ class WarcProxyWithWeb(object):
       with self.proxy_handler.warc_record_for_uri(canonicalize_url(request.uri)) as record:
         if record:
           print "Serving %s from WARC" % request.uri
-          request.write(record[1].content[1])
+
+          # parse the response
+          message = ResponseMessage(RequestMessage())
+          message.feed(record[1].content[1])
+          message.close()
+
+          body = message.get_body()
+
+          # construct new headers
+          new_headers = []
+          old_headers = []
+          for k, v in message.header.headers:
+            if not k.lower() in ("connection", "content-length", "cache-control", "accept-ranges", "etag", "last-modified"):
+              new_headers.append((k, v))
+            old_headers.append(("X-Archive-Orig-%s" % k, v))
+
+          new_headers.append(("Connection", "keep-alive"))
+          new_headers.append(("Content-Length", "%d" % len(body)))
+
+          # write the response
+          request.write("%s %d %s\r\n" % (message.header.version, message.header.code, message.header.phrase))
+          request.write("\r\n".join([ "%s: %s" % (k,v) for k,v in (new_headers + old_headers) ]))
+          request.write("\r\n\r\n")
+          request.write(body)
+
         else:
           print "Could not find %s in WARC" % request.uri
           request.write("HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 91\r\n\r\nThis URL is not in any of your archives. Close the WARC viewer to resume normal browsing.\r\n")
