@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import gc
 import os
 import os.path
